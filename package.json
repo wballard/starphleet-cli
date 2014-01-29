@@ -1,0 +1,38 @@
+{
+  "name": "starphleet-cli",
+  "version": "0.0.1",
+  "description": "The fully open container based continuous deployment PaaS.",
+  "bin": {
+    "starphleet": "./starphleet"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wballard/starphleet-cli.git"
+  },
+  "keywords": [
+    "paas",
+    "autodeploy",
+    "lxc",
+    "container",
+    "service"
+  ],
+  "author": "Rear Admiral Ballard",
+  "license": "BSD",
+  "readmeFilename": "README.md",
+  "bugs": {
+    "url": "https://github.com/wballard/starphleet-cli/issues"
+  },
+  "dependencies": {
+    "docopt": "~0.4.0",
+    "coffee-script": "~1.7.0",
+    "lodash": "~1.3.1",
+    "handlebars": "~1.0.12",
+    "aws-sdk": "~1.6.0",
+    "async": "~0.2.9",
+    "MD5": "~1.1.0",
+    "colors": "~0.6.2",
+    "cli-table": "~0.2.0",
+    "request": "~2.27.0",
+    "js-yaml": "~2.1.3"
+  }
+}
