@@ -27,7 +27,7 @@ doc = """
 
 Usage:
   starphleet init ec2
-  starphleet info ec2
+  starphleet info ec2 [--verbose]
   starphleet add ship ec2 <region>
   starphleet remove ship ec2 <region> <id>
   starphleet name ship ec2 <zone_id> <domain_name> <address>...
@@ -255,7 +255,10 @@ if options.info and options.ec2
         baseStatus = (instance, callback) ->
           request {url: "http://#{instance.PublicDnsName}/starphleet/status", timeout: 2000}, (err, res, body) ->
             #eating errors
-            instance.BaseStatus = body
+            if options['--verbose']
+              instance.Services = yaml.safeLoad(body)
+
+            instance.BaseStatus = body.length > 0
             callback undefined, instance
         async.map instances, baseStatus, callback
       #tag-em!
@@ -284,10 +287,10 @@ if options.info and options.ec2
     isThereBadNews err
     sliced = _.map all, (zoneInstances) ->
       _.map zoneInstances, (instance) ->
-        _.pick instance, 'Headquarters', 'Region', 'InstanceType', 'InstanceId', 'PublicDnsName', 'Status', 'Logstream', 'Diagnostic', 'AdmiralSSH'
+        _.pick instance, 'Headquarters', 'Region', 'InstanceType', 'InstanceId', 'PublicDnsName', 'Status', 'Logstream', 'Diagnostic', 'AdmiralSSH', 'Services'
     sliced = _.flatten(sliced)
     if sliced.length
-      console.log yaml.safeDump(sliced)
+      console.log yaml.dump(sliced)
     else
       console.error "Run".yellow
       console.error "  starphleet add ship ec2 [region]".blue
