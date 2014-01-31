@@ -16,7 +16,6 @@ md5 = require 'MD5'
 AWS = require 'aws-sdk'
 pkg = require(path.join(__dirname, "./package.json"))
 colors = require 'colors'
-table = require 'cli-table'
 request = require 'request'
 os = require 'os'
 yaml = require 'js-yaml'
@@ -48,7 +47,6 @@ Description:
   including:
     * Setting up security policies
     * Setting up multiple container ships, which are hosts with a cute name
-    * Setting up load balancing across ships for the whole phleet
     * Spreading your phleet across availability zones
 
   init
@@ -83,10 +81,6 @@ images =
   'eu-west-1': 'ami-d23cd5a5'
   'ap-southeast-1': 'ami-82c793d0'
 zones = _.map _.keys(images), (x) -> new AWS.EC2 {region: x, maxRetries: 15}
-zones = _.map zones, (zone) ->
-  zone.elb = new AWS.ELB {region: zone.config.region, maxRetries: 15}
-  zone
-
 
 isThereBadNews = (err) ->
   if /LoadBalancerNotFound/.test("#{err}")
@@ -106,27 +100,6 @@ mustBeSet = (name) ->
 niceToHave = (name, message) ->
   if not process.env[name]
     console.error "#{name} #{message}".yellow
-
-###
-Slight twist on map, take an array mapping through a function, then
-store the resulting mapped values back on the original array members by
-extending them.
-###
-async.join = (array, mapper, propertyName, callback) ->
-  async.map array, mapper, (err, mapped) ->
-    if err
-      callback(err)
-    else
-      callback undefined, _.map _.zip(array, mapped), (x) ->
-        x[0][propertyName] = x[1]
-        x[0]
-
-###
-Naming for our LB which defines a cluster
-###
-hashname = ->
-  url = process.env['STARPHLEET_HEADQUARTERS']
-  "starphleet-#{md5(url).substr(0,8)}"
 
 if options.ec2
   mustBeSet 'AWS_ACCESS_KEY_ID'
@@ -151,39 +124,8 @@ if options.init and options.ec2
     InstancePort: 443
   initZone = (zone, callback) ->
     async.waterfall [
-      #check for an existing ELB
-      (nestedCallback) ->
-        zone.elb.describeLoadBalancers({}, nestedCallback)
-      #build an ELB if we need it
-      (balancers, nestedCallback) ->
-        if _.some(balancers.LoadBalancerDescriptions, (x) -> x.LoadBalancerName is hashname())
-          nestedCallback()
-        else
-          zone.describeAvailabilityZones {}, (err, zones) ->
-            isThereBadNews err
-            zone.elb.createLoadBalancer
-              LoadBalancerName: hashname()
-              Listeners: listeners
-              AvailabilityZones: _.map zones.AvailabilityZones, (x) -> x.ZoneName
-            , nestedCallback
-      #set a realistic LB health policy
-      (optionalResult, nestedCallback) ->
-        # If we generate a new load balancer, the optionalResult will contain information on that instance
-        # Else we will be passed the callback as the first param
-        if typeof optionalResult is 'function'
-          nestedCallback = optionalResult
-
-        zone.elb.configureHealthCheck
-          LoadBalancerName: hashname()
-          HealthCheck:
-            Target: 'TCP:80'
-            Interval: 5
-            Timeout: 2
-            UnhealthyThreshold: 2
-            HealthyThreshold: 2
-          , nestedCallback
       #check for the starphleet security group
-      (ignore, nestedCallback) ->
+      (nestedCallback) ->
         zone.describeSecurityGroups {}, nestedCallback
       #and make the security group if needed
       (groups, nestedCallback) ->
@@ -279,14 +221,12 @@ if options.add and options.ship and options.ec2
         InstanceType:  process.env['EC2_INSTANCE_SIZE'] or EC2_INSTANCE_SIZE
       zone.runInstances todo, callback
     (ran, callback) ->
-      ids = _.map ran.Instances, (x) -> {InstanceId: x.InstanceId}
-      zone.elb.registerInstancesWithLoadBalancer {LoadBalancerName: hashname(), Instances: ids}, callback
-    (ran, callback) ->
       ids = _.map ran.Instances, (x) -> x.InstanceId
       todo =
         Resources: ids
         Tags: [
-          {Key: 'Name', Value: 'Starphleet'}
+          {Key: 'Name', Value: 'Starphleet'},
+          {Key: 'Headquarters', Value: "#{process.env['STARPHLEET_HEADQUARTERS']}"}
         ]
       zone.createTags todo, callback
   ], (err) ->
@@ -298,79 +238,60 @@ if options.info and options.ec2
   queryZone = (zone, zoneCallback) ->
     async.waterfall [
       (callback) ->
-        zone.elb.describeLoadBalancers {LoadBalancerNames: [hashname()]}, callback
-      (loadBalancers, callback) ->
-        getInstances = (balancer, balancerCallback) ->
-          instances = []
-          for instance in balancer.Instances
-            instances.push instance.InstanceId
-          if instances.length
-            zone.describeInstances {InstanceIds: instances}, balancerCallback
-          else
-            balancerCallback undefined, []
-        async.join loadBalancers.LoadBalancerDescriptions, getInstances, 'Instances', callback
-      (loadBalancers, callback) ->
-        #just one, since we are getting it by name
-        loadBalancers[0].Region = zone.config.region
-        callback undefined, loadBalancers[0]
+        zone.describeInstances Filters: [{Name: 'tag-key', Values:["Headquarters"]}]
+          , callback
       #flattening away reservations as I don't care
-      (balancer, callback) ->
-        if balancer?.Instances?.Reservations
-          instances = []
-          for reservation in balancer.Instances.Reservations
-            for instance in reservation.Instances
-              if not instance.PublicDnsName
-                instance.PublicDnsName = instance.State.Name
-              instances.push instance
-          balancer.Instances = instances
-          callback undefined, balancer
-        else
-          balancer.Instances = []
-          callback undefined, balancer
+      (data, callback) ->
+        instances = []
+        for reservation in data?.Reservations or []
+          for instance in reservation.Instances
+            instance.Region = zone.config.region
+            if not instance.PublicDnsName
+              instance.PublicDnsName = instance.State.Name
+            instances.push instance
+        callback undefined, instances
       #now poke at the instances via http to lean starphleet specifics
-      (balancer, callback) ->
+      (instances, callback) ->
         baseStatus = (instance, callback) ->
-          request {url: "http://#{instance.PublicDnsName}/starphleet/diagnostic", timeout: 2000}, (err, res, body) ->
+          request {url: "http://#{instance.PublicDnsName}/starphleet/status", timeout: 2000}, (err, res, body) ->
             #eating errors
-            callback undefined, body
-        async.join balancer.Instances, baseStatus, 'BaseStatus', (err, instances) ->
-          callback err, balancer
+            instance.BaseStatus = body
+            callback undefined, instance
+        async.map instances, baseStatus, callback
+      #tag-em!
+      (instances, callback) ->
+        tags = (instance, callback) ->
+          zone.describeTags Filters: [{Name: 'resource-id', Values: [instance.InstanceId]}], (err, data) ->
+            instance.Headquarters = _.select(data.Tags, (x) -> x.Key is 'Headquarters')?[0]?.Value
+            callback undefined, instance
+        async.map instances, tags, callback
       #status relevant to starphleet, not raw EC2
-      (balancer, callback) ->
-        for instance in balancer.Instances
+      (instances, callback) ->
+        for instance in instances
           if instance.BaseStatus
             instance.Status = 'ready'
           else if instance.State.Name is 'running'
             instance.Status = 'building'
           else
             instance.Status = 'offline'
-        callback undefined, balancer
+          instance.Logstream = "http://#{instance.PublicDnsName}/starphleet/logstream"
+          instance.Diagnostic = "http://#{instance.PublicDnsName}/starphleet/status"
+          instance.AdmiralSSH = "ssh admiral@#{instance.PublicDnsName}"
+        callback undefined, instances or []
     ], zoneCallback
 
   async.map zones, queryZone, (err, all) ->
     isThereBadNews err
-    if _.any(all, (balancer) -> balancer.Instances.length)
-      for balancer in all
-        lb = new table
-          chars: { 'top': '=' , 'top-mid': '' , 'top-left': '' , 'top-right': ''
-            , 'bottom': '' , 'bottom-mid': '' , 'bottom-left': '' , 'bottom-right': ''
-            , 'left': '' , 'left-mid': '' , 'mid': '' , 'mid-mid': ''
-            , 'right': '' , 'right-mid': '' , 'middle': ' ' }
-          style: { 'padding-left': 0, 'padding-right': 1 }
-        lb.push "Region": "#{balancer.Region}"
-        lb.push "Load Balanger": "#{balancer.DNSName}"
-        if balancer.Instances.length
-          for instance in balancer.Instances
-            lb.push "ID": "#{instance.InstanceId}"
-            lb.push "Host": "#{instance.PublicDnsName}"
-            lb.push "Status": "#{instance.Status}"
-        console.log lb.toString()
-      console.log "Dashboards are at", "http://<host>/starphleet/dashboard".cyan
-      console.log "Remember to", "ssh ubuntu@<host>".cyan
+    sliced = _.map all, (zoneInstances) ->
+      _.map zoneInstances, (instance) ->
+        _.pick instance, 'Headquarters', 'Region', 'InstanceType', 'InstanceId', 'PublicDnsName', 'Status', 'Logstream', 'Diagnostic', 'AdmiralSSH'
+    sliced = _.flatten(sliced)
+    if sliced.length
+      console.log yaml.safeDump(sliced)
     else
-      console.log "Run".yellow
-      console.log "  starphleet add ship ec2 [region]".blue
-      console.log "valid regions #{_.map(zones, (x) -> x.config.region)}".yellow
+      console.error "Run".yellow
+      console.error "  starphleet add ship ec2 [region]".blue
+      console.error "valid regions #{_.map(zones, (x) -> x.config.region)}".yellow
     process.exit 0
 
 if options.remove and options.ship and options.ec2
@@ -390,12 +311,6 @@ if options.remove and options.ship and options.ec2
         , callback
       else
         callback undefined, null
-    (ignore, callback) ->
-      zone.elb.deregisterInstancesFromLoadBalancer
-        LoadBalancerName: hashname()
-        Instances:
-          [InstanceId: options['<id>']]
-      , callback
     ], (err) ->
       isThereBadNews err
       process.exit 0
