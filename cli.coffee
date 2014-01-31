@@ -258,7 +258,7 @@ if options.info and options.ec2
             if options['--verbose']
               instance.Services = yaml.safeLoad(body)
 
-            instance.BaseStatus = body.length > 0
+            instance.BaseStatus = (body or '').length > 0
             callback undefined, instance
         async.map instances, baseStatus, callback
       #tag-em!
