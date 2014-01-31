@@ -255,10 +255,17 @@ if options.info and options.ec2
         baseStatus = (instance, callback) ->
           request {url: "http://#{instance.PublicDnsName}/starphleet/status", timeout: 2000}, (err, res, body) ->
             #eating errors
-            if options['--verbose']
+            if options['--verbose'] and body
               instance.Services = yaml.safeLoad(body)
+            else if body
+              stats = yaml.safeLoad(body)
+              instance.FreeRAM = "#{stats.free_ram}%"
+              instance.FreeCPU = "#{stats.free_cpu}%"
+              instance.FreeDisk = "#{stats.free_disk}%"
+              instance.BaseStatus = true
+            else
+              instance.BaseStatus = false
 
-            instance.BaseStatus = (body or '').length > 0
             callback undefined, instance
         async.map instances, baseStatus, callback
       #tag-em!
@@ -287,7 +294,9 @@ if options.info and options.ec2
     isThereBadNews err
     sliced = _.map all, (zoneInstances) ->
       _.map zoneInstances, (instance) ->
-        _.pick instance, 'Headquarters', 'Region', 'InstanceType', 'InstanceId', 'PublicDnsName', 'Status', 'Logstream', 'Diagnostic', 'AdmiralSSH', 'Services'
+        _.pick instance, 'Headquarters', 'Region', 'InstanceType',
+          'InstanceId', 'PublicDnsName', 'Status', 'Logstream',
+          'Diagnostic', 'AdmiralSSH', 'Services', 'FreeRAM', 'FreeCPU', 'FreeDisk'
     sliced = _.flatten(sliced)
     if sliced.length
       console.log yaml.dump(sliced)
