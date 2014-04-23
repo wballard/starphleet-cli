@@ -1,4 +1,4 @@
-#!/u:sr/bin/env coffee
+#!/usr/bin/env coffee
 
 ###
 Main command line for starphleet, this is the program you use on *your computer*
@@ -27,10 +27,9 @@ doc = """
 
 Usage:
   starphleet init ec2
-  starphleet info ec2 [--verbose]
+  starphleet info ec2
   starphleet add ship ec2 <region>
   starphleet remove ship ec2 <region> <id>
-  starphleet name ship ec2 <zone_id> <domain_name> <address>...
   starphleet -h | --help | --version
 
 Notes:
@@ -83,12 +82,7 @@ images =
 zones = _.map _.keys(images), (x) -> new AWS.EC2 {region: x, maxRetries: 15}
 
 isThereBadNews = (err) ->
-  if /LoadBalancerNotFound/.test("#{err}")
-    console.error "No load balancer found for #{process.env['STARPHLEET_HEADQUARTERS']}".yellow
-    console.error "Have you run".yellow
-    console.error "  starphleet init ec2".blue
-    process.exit 1
-  else if err
+  if err
     console.error "#{err}".red
     process.exit 1
 
@@ -250,24 +244,6 @@ if options.info and options.ec2
               instance.PublicDnsName = instance.State.Name
             instances.push instance
         callback undefined, instances
-      #now poke at the instances via http to lean starphleet specifics
-      (instances, callback) ->
-        baseStatus = (instance, callback) ->
-          request {url: "http://#{instance.PublicDnsName}/starphleet/status", timeout: 2000}, (err, res, body) ->
-            #eating errors
-            if options['--verbose'] and body
-              instance.Services = yaml.safeLoad(body)
-            else if body
-              stats = yaml.safeLoad(body)
-              instance.FreeRAM = "#{stats.free_ram}%"
-              instance.FreeCPU = "#{stats.free_cpu}%"
-              instance.FreeDisk = "#{stats.free_disk}%"
-              instance.BaseStatus = true
-            else
-              instance.BaseStatus = false
-
-            callback undefined, instance
-        async.map instances, baseStatus, callback
       #tag-em!
       (instances, callback) ->
         tags = (instance, callback) ->
@@ -278,13 +254,6 @@ if options.info and options.ec2
       #status relevant to starphleet, not raw EC2
       (instances, callback) ->
         for instance in instances
-          if instance.BaseStatus
-            instance.Status = 'ready'
-          else if instance.State.Name is 'running'
-            instance.Status = 'building'
-          else
-            instance.Status = 'offline'
-          instance.Logstream = "http://#{instance.PublicDnsName}/starphleet/logstream"
           instance.Diagnostic = "http://#{instance.PublicDnsName}/starphleet/status"
           instance.AdmiralSSH = "ssh admiral@#{instance.PublicDnsName}"
         callback undefined, instances or []
@@ -295,7 +264,7 @@ if options.info and options.ec2
     sliced = _.map all, (zoneInstances) ->
       _.map zoneInstances, (instance) ->
         _.pick instance, 'Headquarters', 'Region', 'InstanceType',
-          'InstanceId', 'PublicDnsName', 'Status', 'Logstream',
+          'InstanceId', 'PublicDnsName', 'Logstream',
           'Diagnostic', 'AdmiralSSH', 'Services', 'FreeRAM', 'FreeCPU', 'FreeDisk'
     sliced = _.flatten(sliced)
     if sliced.length
@@ -326,32 +295,3 @@ if options.remove and options.ship and options.ec2
     ], (err) ->
       isThereBadNews err
       process.exit 0
-
-if options.name and options.ship and options.ec2
-  route53 = new AWS.Route53 {region: 'us-east-1'}
-  async.waterfall [
-    #need to check for an existing record, shame there is no UPDATE...
-    (nestedCallback) ->
-      route53.listResourceRecordSets {HostedZoneId: options['<zone_id>'], StartRecordName: "#{os.hostname()}.#{options['<domain_name>']}", StartRecordType: 'A', MaxItems: '1'}, nestedCallback
-    (records, nestedCallback) ->
-      change =
-        HostedZoneId: options['<zone_id>']
-        ChangeBatch:
-          Comment: 'Starphleet name update'
-          Changes: []
-      if records.ResourceRecordSets?[0]
-        change.ChangeBatch.Changes.push
-          Action: 'DELETE'
-          ResourceRecordSet: records.ResourceRecordSets[0]
-      change.ChangeBatch.Changes.push
-        Action: 'CREATE'
-        ResourceRecordSet:
-          Name: "#{os.hostname()}.#{options['<domain_name>']}"
-          Type: 'A'
-          TTL: 300
-          ResourceRecords: _.map options['<address>'], (x) -> Value: x
-      route53.changeResourceRecordSets change, nestedCallback
-  ], (err, results) ->
-    isThereBadNews err
-    console.log JSON.stringify results
-    process.exit 0
