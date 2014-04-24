@@ -77,6 +77,7 @@ options = docopt doc, version: pkg.version
 images =
   'us-east-1': 'ami-8f311fe6'
   'us-west-1': 'ami-c2fccc87'
+  'us-west-2': 'ami-0ee67f3e'
   'eu-west-1': 'ami-d23cd5a5'
   'ap-southeast-1': 'ami-82c793d0'
 zones = _.map _.keys(images), (x) -> new AWS.EC2 {region: x, maxRetries: 15}
