@@ -190,6 +190,7 @@ if options.add and options.ship and options.ec2
       #leverage cloud-init cloud-config
       user_data =
         runcmd: [
+          "apt-get -y update",
           "apt-get install -y git",
           "git clone https://github.com/wballard/starphleet.git /starphleet",
           "/starphleet/scripts/starphleet-install",
