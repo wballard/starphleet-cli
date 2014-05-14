@@ -28,7 +28,7 @@ doc = """
 Usage:
   starphleet init ec2
   starphleet info ec2
-  starphleet add ship ec2 <region>
+  starphleet add ship ec2 <region> [--vpc=<vpc>]
   starphleet remove ship ec2 <region> <id>
   starphleet -h | --help | --version
 
@@ -75,11 +75,12 @@ options = docopt doc, version: pkg.version
 
 #All the exciting settings and globals
 images =
-  'us-east-1': 'ami-8f311fe6'
-  'us-west-1': 'ami-c2fccc87'
-  'us-west-2': 'ami-0ee67f3e'
-  'eu-west-1': 'ami-d23cd5a5'
-  'ap-southeast-1': 'ami-82c793d0'
+  'us-east-1': 'ami-7fe7fe16'
+  'us-west-1': 'ami-584d751d'
+  'us-west-2': 'ami-ecc9a3dc'
+  'eu-west-1': 'ami-116b9166'
+  'ap-southeast-1': 'ami-8c7023de'
+  'ap-northeast-1': 'ami-6be69e6a'
 zones = _.map _.keys(images), (x) -> new AWS.EC2 {region: x, maxRetries: 15}
 
 isThereBadNews = (err) ->
@@ -215,6 +216,9 @@ if options.add and options.ship and options.ec2
         SecurityGroups: ['starphleet']
         UserData: new Buffer("#cloud-config\n" + yaml.safeDump(user_data)).toString('base64')
         InstanceType:  process.env['EC2_INSTANCE_SIZE'] or EC2_INSTANCE_SIZE
+      if options['--vpc']
+        todo.SubnetId = options['--vpc']
+        delete todo.SecurityGroups
       zone.runInstances todo, callback
     (ran, callback) ->
       ids = _.map ran.Instances, (x) -> x.InstanceId
