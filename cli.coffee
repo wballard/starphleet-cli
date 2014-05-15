@@ -197,6 +197,10 @@ if options.add and options.ship and options.ec2
           "/starphleet/scripts/starphleet-install",
           "starphleet-headquarters #{process.env['STARPHLEET_HEADQUARTERS']}"
         ]
+        #additional device, if present, should be the lxc host directory
+        bootcmd: [
+          "[ -b /dev/xvdb ] && (mount | grep /mnt) &&  mount --bind /mnt /var/lib/lxc"
+        ]
         write_files: [
           {
             content: fs.readFileSync(process.env['STARPHLEET_PRIVATE_KEY'], 'utf8') if process.env['STARPHLEET_PRIVATE_KEY']
