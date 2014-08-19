@@ -20,7 +20,7 @@ request = require 'request'
 os = require 'os'
 yaml = require 'js-yaml'
 
-EC2_INSTANCE_SIZE="m2.2xlarge"
+EC2_INSTANCE_SIZE="m3.xlarge"
 
 doc = """
 #{pkg.description}
@@ -74,13 +74,12 @@ Description:
 options = docopt doc, version: pkg.version
 
 #All the exciting settings and globals
+#make sure to use the 'hvm-instance' images to get a local disk
 images =
-  'us-east-1': 'ami-7fe7fe16'
-  'us-west-1': 'ami-584d751d'
-  'us-west-2': 'ami-ecc9a3dc'
-  'eu-west-1': 'ami-116b9166'
-  'ap-southeast-1': 'ami-8c7023de'
-  'ap-northeast-1': 'ami-6be69e6a'
+  'us-east-1': 'ami-c2df00aa'
+  'us-west-1': 'ami-ad131fe8'
+  'eu-west-1': 'ami-320ed145'
+  'ap-northeast-1': 'ami-ab7451aa'
 zones = _.map _.keys(images), (x) -> new AWS.EC2 {region: x, maxRetries: 15}
 
 isThereBadNews = (err) ->
@@ -199,6 +198,8 @@ if options.add and options.ship and options.ec2
         ]
         #additional device, if present, should be the lxc host directory
         bootcmd: [
+          "[ -b /dev/xvdb ] && mkfs.ext4 /dev/xvdb",
+          "mount -a",
           "[ -b /dev/xvdb ] && (mount | grep /mnt) &&  mount --bind /mnt /var/lib/lxc"
         ]
         write_files: [
