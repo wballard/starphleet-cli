@@ -77,7 +77,7 @@ options = docopt doc, version: pkg.version
 #make sure to use the 'hvm-instance' images to get a local disk
 images =
   'us-east-1': 'ami-c2df00aa'
-  'us-west-1': 'ami-ad131fe8'
+  'us-west-2': 'ami-87fcb9b7'
   'eu-west-1': 'ami-320ed145'
   'ap-northeast-1': 'ami-ab7451aa'
 zones = _.map _.keys(images), (x) -> new AWS.EC2 {region: x, maxRetries: 15}
